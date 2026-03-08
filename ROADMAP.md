@@ -71,10 +71,10 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. The first producti
   - append paragraphs
   - add `@Agent` comments without rewriting unrelated XML
   - optionally convert `.doc` to `.docx` through LibreOffice or another local converter when present
-- [ ] Add plan/validate/apply style operations where mutation risk is non-trivial:
-  - dry-run replacement plan
-  - comment insertion validation
-  - output path enforcement for non-destructive workflows
+- [x] Add plan/validate/apply style operations where mutation risk is non-trivial:
+  - dry-run comment insertion planning implemented
+  - comment insertion validation implemented through shared target resolution
+  - output path enforcement for non-destructive workflows implemented
 
 ## Phase 4: MCP and Agent Compatibility
 

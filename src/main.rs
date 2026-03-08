@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use zerodraft::{
     AddAgentCommentRequest, Cli, Commands, convert_to_docx, doctor_environment, extract_text,
-    init_project, inspect_document, print_json, resolve_agent_comment_context, run_mcp_stdio,
-    scan_agent_comments, schema_info, skill_api_contract,
+    init_project, inspect_document, plan_agent_comment, print_json, resolve_agent_comment_context,
+    run_mcp_stdio, scan_agent_comments, schema_info, skill_api_contract,
 };
 
 fn main() -> Result<()> {
@@ -32,6 +32,29 @@ fn main() -> Result<()> {
             &resolve_agent_comment_context(&document_path, &task_id, window_radius)?,
             pretty,
         ),
+        Commands::PlanAgentComment {
+            document_path,
+            comment_text,
+            search_text,
+            occurrence,
+            paragraph_index,
+            start_char,
+            end_char,
+            pretty,
+        } => {
+            let request = AddAgentCommentRequest {
+                document_path,
+                output_path: std::path::PathBuf::from("__dry_run__.docx"),
+                comment_text,
+                author: None,
+                search_text,
+                occurrence,
+                paragraph_index,
+                start_char,
+                end_char,
+            };
+            print_json(&plan_agent_comment(request)?, pretty)
+        }
         Commands::AddAgentComment {
             document_path,
             output_path,

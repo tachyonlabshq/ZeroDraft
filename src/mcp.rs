@@ -6,7 +6,8 @@ use std::path::PathBuf;
 
 use crate::{
     AddAgentCommentRequest, convert_to_docx, doctor_environment, extract_text, inspect_document,
-    resolve_agent_comment_context, scan_agent_comments, schema_info, skill_api_contract,
+    plan_agent_comment, resolve_agent_comment_context, scan_agent_comments, schema_info,
+    skill_api_contract,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -163,6 +164,40 @@ fn call_tool(params: Option<Value>) -> Result<Value> {
                 .unwrap_or(2) as usize;
             serde_json::to_value(resolve_agent_comment_context(path, task_id, window_radius)?)?
         }
+        "plan_agent_comment" => {
+            let document_path = PathBuf::from(required_string_from_scopes(
+                args,
+                "document_path",
+                &["path"],
+            )?);
+            let comment_text = required_string(args, "comment_text")?.to_string();
+            let search_text = optional_string(args, "search_text").map(str::to_string);
+            let occurrence = args.get("occurrence").and_then(Value::as_u64).unwrap_or(1) as usize;
+            let paragraph_index = args
+                .get("paragraph_index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let start_char = args
+                .get("start_char")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let end_char = args
+                .get("end_char")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+
+            serde_json::to_value(plan_agent_comment(AddAgentCommentRequest {
+                document_path,
+                output_path: PathBuf::from("__dry_run__.docx"),
+                comment_text,
+                author: None,
+                search_text,
+                occurrence,
+                paragraph_index,
+                start_char,
+                end_char,
+            })?)?
+        }
         "add_agent_comment" => {
             let document_path = PathBuf::from(required_string_from_scopes(
                 args,
@@ -273,6 +308,25 @@ fn list_tools() -> Vec<McpToolDescriptor> {
                     "window_radius": { "type": "integer", "minimum": 0 }
                 },
                 "required": ["document_path", "task_id"]
+            }),
+        },
+        McpToolDescriptor {
+            name: "plan_agent_comment".to_string(),
+            description:
+                "Dry-run a targeted Word comment insertion and return the selected text plus expected OOXML side effects."
+                    .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "document_path": { "type": "string" },
+                    "comment_text": { "type": "string" },
+                    "search_text": { "type": "string" },
+                    "occurrence": { "type": "integer", "minimum": 1 },
+                    "paragraph_index": { "type": "integer", "minimum": 0 },
+                    "start_char": { "type": "integer", "minimum": 0 },
+                    "end_char": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["document_path", "comment_text"]
             }),
         },
         McpToolDescriptor {

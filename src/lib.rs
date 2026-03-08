@@ -66,6 +66,23 @@ pub enum Commands {
         #[arg(long)]
         pretty: bool,
     },
+    PlanAgentComment {
+        document_path: PathBuf,
+        #[arg(long)]
+        comment_text: String,
+        #[arg(long)]
+        search_text: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        occurrence: usize,
+        #[arg(long)]
+        paragraph_index: Option<usize>,
+        #[arg(long)]
+        start_char: Option<usize>,
+        #[arg(long)]
+        end_char: Option<usize>,
+        #[arg(long)]
+        pretty: bool,
+    },
     AddAgentComment {
         document_path: PathBuf,
         output_path: PathBuf,
@@ -201,6 +218,24 @@ pub struct AddAgentCommentReport {
     pub selected_text: String,
     pub comments_part_created: bool,
     pub relationship_created: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentCommentPlanReport {
+    pub status: String,
+    pub document_path: String,
+    pub paragraph_index: usize,
+    pub start_char: usize,
+    pub end_char: usize,
+    pub selected_text: String,
+    pub comment_text: String,
+    pub comments_part_exists: bool,
+    pub comments_part_will_be_created: bool,
+    pub comments_relationship_exists: bool,
+    pub comments_relationship_will_be_created: bool,
+    pub content_type_exists: bool,
+    pub content_type_will_be_created: bool,
+    pub next_comment_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -488,6 +523,36 @@ pub fn add_agent_comment(request: AddAgentCommentRequest) -> Result<AddAgentComm
         selected_text: selection.selected_text,
         comments_part_created: !comments_before,
         relationship_created,
+    })
+}
+
+pub fn plan_agent_comment(request: AddAgentCommentRequest) -> Result<AgentCommentPlanReport> {
+    validate_add_comment_request(&request)?;
+
+    let package = DocxPackage::open(&request.document_path)?;
+    let extracted = extract_text(&request.document_path, None)?;
+    let selection = resolve_selection(&extracted.paragraphs, &request)?;
+
+    let comments_part_exists = package.contains(COMMENTS_XML_PATH);
+    let comments_relationship_exists = comments_relationship_exists(&package)?;
+    let content_type_exists = comments_content_type_exists(&package)?;
+    let next_comment_id = next_comment_id(&package)?;
+
+    Ok(AgentCommentPlanReport {
+        status: "success".to_string(),
+        document_path: request.document_path.display().to_string(),
+        paragraph_index: selection.paragraph_index,
+        start_char: selection.start_char,
+        end_char: selection.end_char,
+        selected_text: selection.selected_text,
+        comment_text: request.comment_text,
+        comments_part_exists,
+        comments_part_will_be_created: !comments_part_exists,
+        comments_relationship_exists,
+        comments_relationship_will_be_created: !comments_relationship_exists,
+        content_type_exists,
+        content_type_will_be_created: !content_type_exists,
+        next_comment_id,
     })
 }
 
@@ -1032,6 +1097,25 @@ fn ensure_comments_relationship(package: &mut DocxPackage) -> Result<bool> {
     Ok(true)
 }
 
+fn comments_relationship_exists(package: &DocxPackage) -> Result<bool> {
+    let Some(rels) = package.read_xml(DOCUMENT_RELS_XML_PATH)? else {
+        return Ok(false);
+    };
+    for child in &rels.children {
+        let XMLNode::Element(element) = child else {
+            continue;
+        };
+        if element_is(element, "Relationship")
+            && attr_value(element, &["Type", "type"])
+                .map(|value| value == COMMENTS_REL_TYPE)
+                .unwrap_or(false)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn next_relationship_id(rels: &Element) -> String {
     let next = rels
         .children
@@ -1054,14 +1138,7 @@ fn ensure_comments_content_type(package: &mut DocxPackage) -> Result<()> {
     let mut content_types = package
         .read_xml(CONTENT_TYPES_XML_PATH)?
         .ok_or_else(|| anyhow!("missing {CONTENT_TYPES_XML_PATH}"))?;
-    let exists = content_types.children.iter().any(|node| match node {
-        XMLNode::Element(element) if element_is(element, "Override") => {
-            attr_value(element, &["PartName", "partname"])
-                .map(|value| value == "/word/comments.xml")
-                .unwrap_or(false)
-        }
-        _ => false,
-    });
+    let exists = comments_content_type_in_element(&content_types);
     if !exists {
         let mut override_part = Element::new("Override");
         override_part
@@ -1074,6 +1151,24 @@ fn ensure_comments_content_type(package: &mut DocxPackage) -> Result<()> {
         package.write_xml(CONTENT_TYPES_XML_PATH, &content_types)?;
     }
     Ok(())
+}
+
+fn comments_content_type_exists(package: &DocxPackage) -> Result<bool> {
+    let Some(content_types) = package.read_xml(CONTENT_TYPES_XML_PATH)? else {
+        return Ok(false);
+    };
+    Ok(comments_content_type_in_element(&content_types))
+}
+
+fn comments_content_type_in_element(content_types: &Element) -> bool {
+    content_types.children.iter().any(|node| match node {
+        XMLNode::Element(element) if element_is(element, "Override") => {
+            attr_value(element, &["PartName", "partname"])
+                .map(|value| value == "/word/comments.xml")
+                .unwrap_or(false)
+        }
+        _ => false,
+    })
 }
 
 fn append_comment_record(
@@ -1279,6 +1374,64 @@ mod tests {
         assert_eq!(scan.task_count, 1);
         assert_eq!(scan.tasks[0].selected_text, "beta gamma");
         assert_eq!(scan.tasks[0].author.as_deref(), Some("Michael Wong"));
+        Ok(())
+    }
+
+    #[test]
+    fn plan_agent_comment_reports_new_parts_for_fresh_document() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        write_test_docx(&source, TEST_DOCUMENT_XML_SIMPLE, None)?;
+
+        let plan = plan_agent_comment(AddAgentCommentRequest {
+            document_path: source,
+            output_path: tmp.path().join("ignored.docx"),
+            comment_text: "@Agent review this clause".to_string(),
+            author: None,
+            search_text: Some("beta gamma".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert_eq!(plan.selected_text, "beta gamma");
+        assert!(plan.comments_part_will_be_created);
+        assert!(plan.comments_relationship_will_be_created);
+        assert!(plan.content_type_will_be_created);
+        assert_eq!(plan.next_comment_id, "0");
+        Ok(())
+    }
+
+    #[test]
+    fn plan_agent_comment_reuses_existing_comment_infrastructure() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        write_test_docx(
+            &source,
+            TEST_DOCUMENT_XML_WITH_COMMENT,
+            Some(TEST_COMMENTS_XML),
+        )?;
+
+        let plan = plan_agent_comment(AddAgentCommentRequest {
+            document_path: source,
+            output_path: tmp.path().join("ignored.docx"),
+            comment_text: "@Agent add follow-up".to_string(),
+            author: None,
+            search_text: Some("Closing paragraph.".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert!(plan.comments_part_exists);
+        assert!(!plan.comments_part_will_be_created);
+        assert!(plan.comments_relationship_exists);
+        assert!(!plan.comments_relationship_will_be_created);
+        assert!(plan.content_type_exists);
+        assert!(!plan.content_type_will_be_created);
+        assert_eq!(plan.next_comment_id, "1");
         Ok(())
     }
 

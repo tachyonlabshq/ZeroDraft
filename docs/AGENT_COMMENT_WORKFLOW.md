@@ -46,5 +46,6 @@ ZeroDraft returns a task payload with both the highlighted target and the instru
 1. `inspect_document`
 2. `scan_agent_comments`
 3. `resolve_agent_comment_context`
-4. draft a change
-5. optionally write back a new targeted comment with `add_agent_comment`
+4. `plan_agent_comment`
+5. draft a change
+6. optionally write back a new targeted comment with `add_agent_comment`

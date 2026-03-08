@@ -12,6 +12,7 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. It runs as both a 
   - the normalized instruction
   - the paragraph window where the comment applies
 - Resolve surrounding paragraph context for a scanned `@Agent` task.
+- Dry-run a comment insertion plan before mutating a document.
 - Insert classic Word comments programmatically for targeted follow-up.
 - Convert legacy `.doc` files to `.docx` through LibreOffice headless mode.
 - Run as `mcp-stdio` for OpenCode and other MCP-capable hosts.
@@ -37,6 +38,7 @@ See [docs/AGENT_COMMENT_WORKFLOW.md](/Users/michaelwong/Developer/ZeroDraft/docs
 - `extract-text`
 - `scan-agent-comments`
 - `resolve-agent-comment-context`
+- `plan-agent-comment`
 - `add-agent-comment`
 - `convert-to-docx`
 - `doctor`
@@ -63,6 +65,15 @@ Resolve nearby context for a task:
 
 ```bash
 cargo run -- resolve-agent-comment-context ./contract.docx comment-0 --window-radius 2 --pretty
+```
+
+Plan a targeted comment without mutating the document:
+
+```bash
+cargo run -- plan-agent-comment ./contract.docx \
+  --search-text "Limitation of Liability" \
+  --comment-text "@Agent tighten this clause" \
+  --pretty
 ```
 
 Create a targeted comment on matching text:
