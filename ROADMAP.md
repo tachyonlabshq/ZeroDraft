@@ -55,6 +55,7 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. The first producti
 - [x] Validate edge cases:
   - repeated text matches
   - split runs with different formatting
+  - multiple text nodes, tabs, and line breaks within a run
   - empty selections
   - existing comments and id collisions
   - multi-paragraph selections

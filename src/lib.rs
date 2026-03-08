@@ -279,6 +279,12 @@ struct ParagraphSelection {
     selected_text: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RunControlKind {
+    Tab,
+    Break,
+}
+
 #[derive(Debug, Clone)]
 struct DocxPackage {
     entries: BTreeMap<String, Vec<u8>>,
@@ -920,7 +926,8 @@ fn mutate_paragraph_with_comment(
     for child in original_children {
         match child {
             XMLNode::Element(run) if element_is(&run, "r") => {
-                if let Some(run_text) = extract_simple_run_text(&run)? {
+                let run_text = collect_visible_text(&run);
+                if !run_text.is_empty() {
                     let run_len = char_count(&run_text);
                     let run_start = char_cursor;
                     let run_end = run_start + run_len;
@@ -940,7 +947,8 @@ fn mutate_paragraph_with_comment(
                             slice_chars(&run_text, overlap_end - run_start, char_count(&run_text));
 
                         if !before.is_empty() {
-                            rebuilt.push(XMLNode::Element(clone_run_with_text(&run, &before)?));
+                            rebuilt
+                                .push(XMLNode::Element(clone_run_with_visible_text(&run, &before)));
                         }
                         if !inserted_start {
                             rebuilt.push(XMLNode::Element(make_comment_marker(
@@ -950,7 +958,9 @@ fn mutate_paragraph_with_comment(
                             inserted_start = true;
                         }
                         if !selected.is_empty() {
-                            rebuilt.push(XMLNode::Element(clone_run_with_text(&run, &selected)?));
+                            rebuilt.push(XMLNode::Element(clone_run_with_visible_text(
+                                &run, &selected,
+                            )));
                         }
                         if overlap_end == selection.end_char && !inserted_end {
                             rebuilt.push(XMLNode::Element(make_comment_marker(
@@ -961,7 +971,8 @@ fn mutate_paragraph_with_comment(
                             inserted_end = true;
                         }
                         if !after.is_empty() {
-                            rebuilt.push(XMLNode::Element(clone_run_with_text(&run, &after)?));
+                            rebuilt
+                                .push(XMLNode::Element(clone_run_with_visible_text(&run, &after)));
                         }
                     }
 
@@ -984,67 +995,48 @@ fn mutate_paragraph_with_comment(
     Ok(())
 }
 
-fn extract_simple_run_text(run: &Element) -> Result<Option<String>> {
-    let mut text_nodes = Vec::new();
-    collect_text_elements(run, &mut text_nodes);
-    if text_nodes.is_empty() {
-        return Ok(None);
-    }
-    if text_nodes.len() > 1 {
-        bail!("runs with multiple text nodes are not yet supported for comment insertion");
-    }
-    Ok(Some(text_content(text_nodes[0])))
-}
-
-fn collect_text_elements<'a>(element: &'a Element, out: &mut Vec<&'a Element>) {
-    if element_is(element, "t") {
-        out.push(element);
-        return;
-    }
-    for child in &element.children {
-        if let XMLNode::Element(child_element) = child {
-            collect_text_elements(child_element, out);
+fn clone_run_with_visible_text(run: &Element, visible_text: &str) -> Element {
+    let mut cloned = Element::new("w:r");
+    for child in &run.children {
+        if let XMLNode::Element(element) = child
+            && element_is(element, "rPr")
+        {
+            cloned.children.push(XMLNode::Element(element.clone()));
         }
     }
-}
 
-fn clone_run_with_text(run: &Element, replacement_text: &str) -> Result<Element> {
-    let mut cloned = run.clone();
-    let mut replaced = false;
-    replace_first_text_node(&mut cloned, replacement_text, &mut replaced);
-    if !replaced {
-        bail!("run did not contain a replaceable w:t node");
-    }
-    Ok(cloned)
-}
-
-fn replace_first_text_node(element: &mut Element, replacement_text: &str, replaced: &mut bool) {
-    if *replaced {
-        return;
-    }
-    if element_is(element, "t") {
-        element.children.clear();
-        element
-            .children
-            .push(XMLNode::Text(replacement_text.to_string()));
-        if replacement_text.starts_with(' ') || replacement_text.ends_with(' ') {
-            element
-                .attributes
+    let mut text_buffer = String::new();
+    let flush_text = |run_element: &mut Element, buffer: &mut String| {
+        if buffer.is_empty() {
+            return;
+        }
+        let mut text = Element::new("w:t");
+        if buffer.starts_with(' ') || buffer.ends_with(' ') {
+            text.attributes
                 .insert("xml:space".to_string(), "preserve".to_string());
-        } else {
-            element.attributes.remove("xml:space");
         }
-        *replaced = true;
-        return;
-    }
-    for child in &mut element.children {
-        if let XMLNode::Element(child_element) = child {
-            replace_first_text_node(child_element, replacement_text, replaced);
-            if *replaced {
-                return;
+        text.children.push(XMLNode::Text(buffer.clone()));
+        run_element.children.push(XMLNode::Element(text));
+        buffer.clear();
+    };
+
+    for ch in visible_text.chars() {
+        match control_kind_for_char(ch) {
+            Some(RunControlKind::Tab) => {
+                flush_text(&mut cloned, &mut text_buffer);
+                cloned
+                    .children
+                    .push(XMLNode::Element(Element::new("w:tab")));
             }
+            Some(RunControlKind::Break) => {
+                flush_text(&mut cloned, &mut text_buffer);
+                cloned.children.push(XMLNode::Element(Element::new("w:br")));
+            }
+            None => text_buffer.push(ch),
         }
     }
+    flush_text(&mut cloned, &mut text_buffer);
+    cloned
 }
 
 fn make_comment_marker(name: &str, comment_id: &str) -> Element {
@@ -1270,6 +1262,14 @@ fn collect_visible_text_into(element: &Element, out: &mut String) {
     }
 }
 
+fn control_kind_for_char(ch: char) -> Option<RunControlKind> {
+    match ch {
+        '\t' => Some(RunControlKind::Tab),
+        '\n' => Some(RunControlKind::Break),
+        _ => None,
+    }
+}
+
 fn slice_chars(text: &str, start: usize, end: usize) -> String {
     text.chars()
         .skip(start)
@@ -1461,6 +1461,58 @@ mod tests {
     }
 
     #[test]
+    fn add_agent_comment_handles_multi_text_node_run() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        let output = tmp.path().join("output.docx");
+        write_test_docx(&source, TEST_DOCUMENT_XML_WITH_MULTI_TEXT_NODE_RUN, None)?;
+
+        let report = add_agent_comment(AddAgentCommentRequest {
+            document_path: source,
+            output_path: output.clone(),
+            comment_text: "@Agent tighten this phrase".to_string(),
+            author: None,
+            search_text: Some("alpha beta".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert_eq!(report.selected_text, "alpha beta");
+        let scan = scan_agent_comments(&output)?;
+        assert_eq!(scan.task_count, 1);
+        assert_eq!(scan.tasks[0].selected_text, "alpha beta");
+        Ok(())
+    }
+
+    #[test]
+    fn add_agent_comment_handles_tabbed_run_selection() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        let output = tmp.path().join("output.docx");
+        write_test_docx(&source, TEST_DOCUMENT_XML_WITH_TABBED_RUN, None)?;
+
+        let report = add_agent_comment(AddAgentCommentRequest {
+            document_path: source,
+            output_path: output.clone(),
+            comment_text: "@Agent review aligned fields".to_string(),
+            author: None,
+            search_text: Some("alpha\tbeta".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert_eq!(report.selected_text, "alpha\tbeta");
+        let scan = scan_agent_comments(&output)?;
+        assert_eq!(scan.task_count, 1);
+        assert_eq!(scan.tasks[0].selected_text, "alpha\tbeta");
+        Ok(())
+    }
+
+    #[test]
     fn resolve_agent_comment_context_returns_window() -> Result<()> {
         let tmp = tempdir()?;
         let doc_path = tmp.path().join("sample.docx");
@@ -1590,6 +1642,18 @@ mod tests {
         <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
         <w:body>\
         <w:p><w:r><w:t>repeat repeat end</w:t></w:r></w:p>\
+        </w:body></w:document>";
+
+    const TEST_DOCUMENT_XML_WITH_MULTI_TEXT_NODE_RUN: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+        <w:body>\
+        <w:p><w:r><w:t>alpha </w:t><w:t>beta</w:t><w:t> gamma</w:t></w:r></w:p>\
+        </w:body></w:document>";
+
+    const TEST_DOCUMENT_XML_WITH_TABBED_RUN: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
+        <w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">\
+        <w:body>\
+        <w:p><w:r><w:t>alpha</w:t><w:tab/><w:t>beta</w:t><w:br/><w:t>gamma</w:t></w:r></w:p>\
         </w:body></w:document>";
 
     const TEST_DOCUMENT_XML_WITH_COMMENT: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\

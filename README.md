@@ -14,6 +14,7 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. It runs as both a 
 - Resolve surrounding paragraph context for a scanned `@Agent` task.
 - Dry-run a comment insertion plan before mutating a document.
 - Insert classic Word comments programmatically for targeted follow-up.
+  - supports multi-run selections, including visible tabs and line breaks within a run
 - Convert legacy `.doc` files to `.docx` through LibreOffice headless mode.
 - Run as `mcp-stdio` for OpenCode and other MCP-capable hosts.
 

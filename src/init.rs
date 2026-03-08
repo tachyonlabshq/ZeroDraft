@@ -146,8 +146,9 @@ This project is configured to use ZeroDraft through MCP.\n\n\
 1. Use `inspect_document` before operating on an unfamiliar DOCX.\n\
 2. Use `scan_agent_comments` to discover Word comments tagged with `@Agent`.\n\
 3. Use `resolve_agent_comment_context` before rewriting a highlighted range.\n\
-4. Use `add_agent_comment` when you need to create a targeted follow-up instruction.\n\
-5. Use `doctor` if `.doc` conversion or MCP setup looks unhealthy.\n",
+4. Use `plan_agent_comment` before any new writeback so the target range and XML side effects are explicit.\n\
+5. Use `add_agent_comment` when you need to create a targeted follow-up instruction.\n\
+6. Use `doctor` if `.doc` conversion or MCP setup looks unhealthy.\n",
         binary_path.display()
     );
     fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
