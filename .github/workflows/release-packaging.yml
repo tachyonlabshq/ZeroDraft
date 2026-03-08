@@ -1,0 +1,50 @@
+name: Release Packaging
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            bin_name: zerodraft-macos-arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bin_name: zerodraft-macos-x64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: zerodraft-windows-x64.exe
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bin_name: zerodraft-windows-arm64.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Stage binary
+        shell: bash
+        run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp "target/${{ matrix.target }}/release/zerodraft.exe" "dist/${{ matrix.bin_name }}"
+          else
+            cp "target/${{ matrix.target }}/release/zerodraft" "dist/${{ matrix.bin_name }}"
+            chmod +x "dist/${{ matrix.bin_name }}"
+          fi
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bin_name }}
+          path: dist/${{ matrix.bin_name }}

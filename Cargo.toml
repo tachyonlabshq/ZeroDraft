@@ -1,0 +1,22 @@
+[package]
+name = "zerodraft"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.5.41", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+xmltree = "0.11.0"
+zip = "8.2.0"
+
+[dev-dependencies]
+tempfile = "3.26.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
