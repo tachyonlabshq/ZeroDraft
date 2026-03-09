@@ -5,9 +5,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use crate::{
-    AddAgentCommentRequest, convert_to_docx, doctor_environment, extract_text, inspect_document,
-    plan_agent_comment, resolve_agent_comment_context, scan_agent_comments, schema_info,
-    skill_api_contract,
+    AddAgentCommentRequest, ReplaceTextRequest, convert_to_docx, doctor_environment, extract_text,
+    inspect_document, plan_agent_comment, replace_range_text, resolve_agent_comment_context,
+    scan_agent_comments, schema_info, skill_api_contract,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -234,6 +234,40 @@ fn call_tool(params: Option<Value>) -> Result<Value> {
                 end_char,
             })?)?
         }
+        "replace_range_text" => {
+            let document_path = PathBuf::from(required_string_from_scopes(
+                args,
+                "document_path",
+                &["path"],
+            )?);
+            let output_path = PathBuf::from(required_string(args, "output_path")?);
+            let replacement_text = required_string(args, "replacement_text")?.to_string();
+            let search_text = optional_string(args, "search_text").map(str::to_string);
+            let occurrence = args.get("occurrence").and_then(Value::as_u64).unwrap_or(1) as usize;
+            let paragraph_index = args
+                .get("paragraph_index")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let start_char = args
+                .get("start_char")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+            let end_char = args
+                .get("end_char")
+                .and_then(Value::as_u64)
+                .map(|value| value as usize);
+
+            serde_json::to_value(replace_range_text(ReplaceTextRequest {
+                document_path,
+                output_path,
+                replacement_text,
+                search_text,
+                occurrence,
+                paragraph_index,
+                start_char,
+                end_char,
+            })?)?
+        }
         "convert_to_docx" => {
             let input_path = required_string(args, "input_path")?;
             let output_path = required_string(args, "output_path")?;
@@ -348,6 +382,26 @@ fn list_tools() -> Vec<McpToolDescriptor> {
                     "end_char": { "type": "integer", "minimum": 1 }
                 },
                 "required": ["document_path", "output_path", "comment_text"]
+            }),
+        },
+        McpToolDescriptor {
+            name: "replace_range_text".to_string(),
+            description:
+                "Replace a targeted visible text range in a DOCX and write the result to a new output file."
+                    .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "document_path": { "type": "string" },
+                    "output_path": { "type": "string" },
+                    "replacement_text": { "type": "string" },
+                    "search_text": { "type": "string" },
+                    "occurrence": { "type": "integer", "minimum": 1 },
+                    "paragraph_index": { "type": "integer", "minimum": 0 },
+                    "start_char": { "type": "integer", "minimum": 0 },
+                    "end_char": { "type": "integer", "minimum": 1 }
+                },
+                "required": ["document_path", "output_path", "replacement_text"]
             }),
         },
         McpToolDescriptor {

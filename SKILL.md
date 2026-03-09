@@ -19,8 +19,9 @@ Use ZeroDraft when an agent needs to inspect or manipulate Microsoft Word docume
 2. Run `scan-agent-comments` to discover user-authored `@Agent` tasks.
 3. Run `resolve-agent-comment-context` before drafting a targeted change.
 4. Run `plan-agent-comment` before any new writeback so the target range and XML side effects are explicit.
-5. Use `add-agent-comment` when the agent needs to leave a precise follow-up marker.
-6. Use `convert-to-docx` when the source file is a legacy `.doc`.
+5. Use `replace-range-text` to rewrite a targeted visible range into a new DOCX.
+6. Use `add-agent-comment` when the agent needs to leave a precise follow-up marker.
+7. Use `convert-to-docx` when the source file is a legacy `.doc`.
 
 ## Binary
 
@@ -35,6 +36,7 @@ Use ZeroDraft when an agent needs to inspect or manipulate Microsoft Word docume
 - `resolve_agent_comment_context`
 - `plan_agent_comment`
 - `add_agent_comment`
+- `replace_range_text`
 - `convert_to_docx`
 - `doctor_environment`
 - `schema_info`

@@ -41,6 +41,7 @@ See [docs/AGENT_COMMENT_WORKFLOW.md](/Users/michaelwong/Developer/ZeroDraft/docs
 - `resolve-agent-comment-context`
 - `plan-agent-comment`
 - `add-agent-comment`
+- `replace-range-text`
 - `convert-to-docx`
 - `doctor`
 - `init`
@@ -84,6 +85,15 @@ cargo run -- add-agent-comment ./contract.docx ./contract.commented.docx \
   --search-text "Limitation of Liability" \
   --comment-text "@Agent tighten this clause" \
   --author "ZeroDraft" \
+  --pretty
+```
+
+Replace a targeted text range into a new DOCX:
+
+```bash
+cargo run -- replace-range-text ./contract.docx ./contract.revised.docx \
+  --search-text "Limitation of Liability" \
+  --replacement-text "Mutual Limitation of Liability" \
   --pretty
 ```
 

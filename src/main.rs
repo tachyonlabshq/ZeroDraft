@@ -1,9 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use zerodraft::{
-    AddAgentCommentRequest, Cli, Commands, convert_to_docx, doctor_environment, extract_text,
-    init_project, inspect_document, plan_agent_comment, print_json, resolve_agent_comment_context,
-    run_mcp_stdio, scan_agent_comments, schema_info, skill_api_contract,
+    AddAgentCommentRequest, Cli, Commands, ReplaceTextRequest, convert_to_docx, doctor_environment,
+    extract_text, init_project, inspect_document, plan_agent_comment, print_json,
+    replace_range_text, resolve_agent_comment_context, run_mcp_stdio, scan_agent_comments,
+    schema_info, skill_api_contract,
 };
 
 fn main() -> Result<()> {
@@ -79,6 +80,29 @@ fn main() -> Result<()> {
                 end_char,
             };
             print_json(&zerodraft::add_agent_comment(request)?, pretty)
+        }
+        Commands::ReplaceRangeText {
+            document_path,
+            output_path,
+            replacement_text,
+            search_text,
+            occurrence,
+            paragraph_index,
+            start_char,
+            end_char,
+            pretty,
+        } => {
+            let request = ReplaceTextRequest {
+                document_path,
+                output_path,
+                replacement_text,
+                search_text,
+                occurrence,
+                paragraph_index,
+                start_char,
+                end_char,
+            };
+            print_json(&replace_range_text(request)?, pretty)
         }
         Commands::ConvertToDocx {
             input_path,

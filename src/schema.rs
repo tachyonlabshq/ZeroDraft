@@ -60,6 +60,7 @@ pub fn skill_api_contract() -> SkillApiContractResponse {
             "resolve-agent-comment-context".to_string(),
             "plan-agent-comment".to_string(),
             "add-agent-comment".to_string(),
+            "replace-range-text".to_string(),
             "convert-to-docx".to_string(),
             "doctor".to_string(),
             "init".to_string(),
@@ -74,6 +75,7 @@ pub fn skill_api_contract() -> SkillApiContractResponse {
             "resolve_agent_comment_context".to_string(),
             "plan_agent_comment".to_string(),
             "add_agent_comment".to_string(),
+            "replace_range_text".to_string(),
             "convert_to_docx".to_string(),
             "doctor_environment".to_string(),
             "schema_info".to_string(),
@@ -85,6 +87,8 @@ pub fn skill_api_contract() -> SkillApiContractResponse {
             "Add-agent-comment stays non-destructive by requiring an explicit output_path."
                 .to_string(),
             "Plan-agent-comment never mutates the source document and can be used as a mandatory preflight."
+                .to_string(),
+            "Replace-range-text stays non-destructive by requiring an explicit output_path."
                 .to_string(),
             "MCP tool names remain stable within the 1.x contract line.".to_string(),
         ],

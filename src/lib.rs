@@ -103,6 +103,24 @@ pub enum Commands {
         #[arg(long)]
         pretty: bool,
     },
+    ReplaceRangeText {
+        document_path: PathBuf,
+        output_path: PathBuf,
+        #[arg(long)]
+        replacement_text: String,
+        #[arg(long)]
+        search_text: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        occurrence: usize,
+        #[arg(long)]
+        paragraph_index: Option<usize>,
+        #[arg(long)]
+        start_char: Option<usize>,
+        #[arg(long)]
+        end_char: Option<usize>,
+        #[arg(long)]
+        pretty: bool,
+    },
     ConvertToDocx {
         input_path: PathBuf,
         output_path: PathBuf,
@@ -218,6 +236,30 @@ pub struct AddAgentCommentReport {
     pub selected_text: String,
     pub comments_part_created: bool,
     pub relationship_created: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReplaceTextRequest {
+    pub document_path: PathBuf,
+    pub output_path: PathBuf,
+    pub replacement_text: String,
+    pub search_text: Option<String>,
+    pub occurrence: usize,
+    pub paragraph_index: Option<usize>,
+    pub start_char: Option<usize>,
+    pub end_char: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ReplaceTextReport {
+    pub status: String,
+    pub document_path: String,
+    pub output_path: String,
+    pub paragraph_index: usize,
+    pub start_char: usize,
+    pub end_char: usize,
+    pub selected_text: String,
+    pub replacement_text: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -532,6 +574,40 @@ pub fn add_agent_comment(request: AddAgentCommentRequest) -> Result<AddAgentComm
     })
 }
 
+pub fn replace_range_text(request: ReplaceTextRequest) -> Result<ReplaceTextReport> {
+    validate_replace_text_request(&request)?;
+
+    let mut package = DocxPackage::open(&request.document_path)?;
+    let document = package
+        .read_xml(DOCUMENT_XML_PATH)?
+        .ok_or_else(|| anyhow!("missing {DOCUMENT_XML_PATH}"))?;
+    let extracted = extract_text(&request.document_path, None)?;
+    let selection = resolve_selection_from_parts(
+        &extracted.paragraphs,
+        request.search_text.as_deref(),
+        request.occurrence,
+        request.paragraph_index,
+        request.start_char,
+        request.end_char,
+    )?;
+
+    let mut document = document;
+    replace_range_in_document(&mut document, &selection, &request.replacement_text)?;
+    package.write_xml(DOCUMENT_XML_PATH, &document)?;
+    package.write_to(&request.output_path)?;
+
+    Ok(ReplaceTextReport {
+        status: "success".to_string(),
+        document_path: request.document_path.display().to_string(),
+        output_path: request.output_path.display().to_string(),
+        paragraph_index: selection.paragraph_index,
+        start_char: selection.start_char,
+        end_char: selection.end_char,
+        selected_text: selection.selected_text,
+        replacement_text: request.replacement_text,
+    })
+}
+
 pub fn plan_agent_comment(request: AddAgentCommentRequest) -> Result<AgentCommentPlanReport> {
     validate_add_comment_request(&request)?;
 
@@ -641,14 +717,31 @@ fn validate_add_comment_request(request: &AddAgentCommentRequest) -> Result<()> 
         bail!("comment_text must not be empty");
     }
 
-    let has_search = request
-        .search_text
-        .as_ref()
-        .map(|text| !text.is_empty())
-        .unwrap_or(false);
-    let has_range = request.paragraph_index.is_some()
-        || request.start_char.is_some()
-        || request.end_char.is_some();
+    validate_selection_inputs(
+        request.search_text.as_deref(),
+        request.paragraph_index,
+        request.start_char,
+        request.end_char,
+    )
+}
+
+fn validate_replace_text_request(request: &ReplaceTextRequest) -> Result<()> {
+    validate_selection_inputs(
+        request.search_text.as_deref(),
+        request.paragraph_index,
+        request.start_char,
+        request.end_char,
+    )
+}
+
+fn validate_selection_inputs(
+    search_text: Option<&str>,
+    paragraph_index: Option<usize>,
+    start_char: Option<usize>,
+    end_char: Option<usize>,
+) -> Result<()> {
+    let has_search = search_text.map(|text| !text.is_empty()).unwrap_or(false);
+    let has_range = paragraph_index.is_some() || start_char.is_some() || end_char.is_some();
 
     if has_search == has_range {
         bail!(
@@ -656,11 +749,7 @@ fn validate_add_comment_request(request: &AddAgentCommentRequest) -> Result<()> 
         );
     }
 
-    if has_range
-        && (request.paragraph_index.is_none()
-            || request.start_char.is_none()
-            || request.end_char.is_none())
-    {
+    if has_range && (paragraph_index.is_none() || start_char.is_none() || end_char.is_none()) {
         bail!("paragraph_index, start_char, and end_char are all required for explicit ranges");
     }
 
@@ -671,7 +760,25 @@ fn resolve_selection(
     paragraphs: &[ParagraphText],
     request: &AddAgentCommentRequest,
 ) -> Result<ParagraphSelection> {
-    if let Some(search_text) = &request.search_text {
+    resolve_selection_from_parts(
+        paragraphs,
+        request.search_text.as_deref(),
+        request.occurrence,
+        request.paragraph_index,
+        request.start_char,
+        request.end_char,
+    )
+}
+
+fn resolve_selection_from_parts(
+    paragraphs: &[ParagraphText],
+    search_text: Option<&str>,
+    occurrence: usize,
+    paragraph_index: Option<usize>,
+    start_char: Option<usize>,
+    end_char: Option<usize>,
+) -> Result<ParagraphSelection> {
+    if let Some(search_text) = search_text {
         let mut seen = 0usize;
         for paragraph in paragraphs {
             let mut search_from = 0usize;
@@ -679,12 +786,12 @@ fn resolve_selection(
                 seen += 1;
                 let start = char_count(&paragraph.text[..search_from + idx]);
                 let end = start + char_count(search_text);
-                if seen == request.occurrence {
+                if seen == occurrence {
                     return Ok(ParagraphSelection {
                         paragraph_index: paragraph.index,
                         start_char: start,
                         end_char: end,
-                        selected_text: search_text.clone(),
+                        selected_text: search_text.to_string(),
                     });
                 }
                 search_from += idx + search_text.len();
@@ -692,19 +799,13 @@ fn resolve_selection(
         }
         bail!(
             "search_text occurrence {} was not found in the document",
-            request.occurrence
+            occurrence
         );
     }
 
-    let paragraph_index = request
-        .paragraph_index
-        .ok_or_else(|| anyhow!("missing paragraph_index"))?;
-    let start_char = request
-        .start_char
-        .ok_or_else(|| anyhow!("missing start_char"))?;
-    let end_char = request
-        .end_char
-        .ok_or_else(|| anyhow!("missing end_char"))?;
+    let paragraph_index = paragraph_index.ok_or_else(|| anyhow!("missing paragraph_index"))?;
+    let start_char = start_char.ok_or_else(|| anyhow!("missing start_char"))?;
+    let end_char = end_char.ok_or_else(|| anyhow!("missing end_char"))?;
     let paragraph = paragraphs
         .iter()
         .find(|paragraph| paragraph.index == paragraph_index)
@@ -891,6 +992,18 @@ fn insert_comment_range(
     mutate_paragraph_with_comment(paragraph, selection, comment_id)
 }
 
+fn replace_range_in_document(
+    document: &mut Element,
+    selection: &ParagraphSelection,
+    replacement_text: &str,
+) -> Result<()> {
+    let mut paragraph_counter = 0usize;
+    let paragraph =
+        find_nth_paragraph_mut(document, selection.paragraph_index, &mut paragraph_counter)
+            .ok_or_else(|| anyhow!("paragraph_index out of bounds"))?;
+    mutate_paragraph_with_replacement(paragraph, selection, replacement_text)
+}
+
 fn find_nth_paragraph_mut<'a>(
     element: &'a mut Element,
     target: usize,
@@ -917,11 +1030,69 @@ fn mutate_paragraph_with_comment(
     selection: &ParagraphSelection,
     comment_id: &str,
 ) -> Result<()> {
+    mutate_paragraph_by_visible_range(paragraph, selection, |run, before, selected, after| {
+        let mut nodes = Vec::new();
+        if !before.is_empty() {
+            nodes.push(XMLNode::Element(clone_run_with_visible_text(run, before)));
+        }
+        nodes.push(XMLNode::Element(make_comment_marker(
+            "w:commentRangeStart",
+            comment_id,
+        )));
+        if !selected.is_empty() {
+            nodes.push(XMLNode::Element(clone_run_with_visible_text(run, selected)));
+        }
+        nodes.push(XMLNode::Element(make_comment_marker(
+            "w:commentRangeEnd",
+            comment_id,
+        )));
+        nodes.push(XMLNode::Element(make_comment_reference_run(comment_id)));
+        if !after.is_empty() {
+            nodes.push(XMLNode::Element(clone_run_with_visible_text(run, after)));
+        }
+        nodes
+    })
+}
+
+fn mutate_paragraph_with_replacement(
+    paragraph: &mut Element,
+    selection: &ParagraphSelection,
+    replacement_text: &str,
+) -> Result<()> {
+    let mut inserted_replacement = false;
+    mutate_paragraph_by_visible_range(paragraph, selection, |run, before, _selected, after| {
+        let mut nodes = Vec::new();
+        if !before.is_empty() {
+            nodes.push(XMLNode::Element(clone_run_with_visible_text(run, before)));
+        }
+        if !inserted_replacement {
+            if !replacement_text.is_empty() {
+                nodes.push(XMLNode::Element(clone_run_with_visible_text(
+                    run,
+                    replacement_text,
+                )));
+            }
+            inserted_replacement = true;
+        }
+        if !after.is_empty() {
+            nodes.push(XMLNode::Element(clone_run_with_visible_text(run, after)));
+        }
+        nodes
+    })
+}
+
+fn mutate_paragraph_by_visible_range<F>(
+    paragraph: &mut Element,
+    selection: &ParagraphSelection,
+    mut overlap_rewriter: F,
+) -> Result<()>
+where
+    F: FnMut(&Element, &str, &str, &str) -> Vec<XMLNode>,
+{
     let original_children = std::mem::take(&mut paragraph.children);
     let mut rebuilt = Vec::new();
     let mut char_cursor = 0usize;
-    let mut inserted_start = false;
-    let mut inserted_end = false;
+    let mut overlapped = false;
 
     for child in original_children {
         match child {
@@ -937,6 +1108,7 @@ fn mutate_paragraph_with_comment(
                     if overlap_start >= overlap_end {
                         rebuilt.push(XMLNode::Element(run));
                     } else {
+                        overlapped = true;
                         let before = slice_chars(&run_text, 0, overlap_start - run_start);
                         let selected = slice_chars(
                             &run_text,
@@ -946,34 +1118,7 @@ fn mutate_paragraph_with_comment(
                         let after =
                             slice_chars(&run_text, overlap_end - run_start, char_count(&run_text));
 
-                        if !before.is_empty() {
-                            rebuilt
-                                .push(XMLNode::Element(clone_run_with_visible_text(&run, &before)));
-                        }
-                        if !inserted_start {
-                            rebuilt.push(XMLNode::Element(make_comment_marker(
-                                "w:commentRangeStart",
-                                comment_id,
-                            )));
-                            inserted_start = true;
-                        }
-                        if !selected.is_empty() {
-                            rebuilt.push(XMLNode::Element(clone_run_with_visible_text(
-                                &run, &selected,
-                            )));
-                        }
-                        if overlap_end == selection.end_char && !inserted_end {
-                            rebuilt.push(XMLNode::Element(make_comment_marker(
-                                "w:commentRangeEnd",
-                                comment_id,
-                            )));
-                            rebuilt.push(XMLNode::Element(make_comment_reference_run(comment_id)));
-                            inserted_end = true;
-                        }
-                        if !after.is_empty() {
-                            rebuilt
-                                .push(XMLNode::Element(clone_run_with_visible_text(&run, &after)));
-                        }
+                        rebuilt.extend(overlap_rewriter(&run, &before, &selected, &after));
                     }
 
                     char_cursor = run_end;
@@ -985,9 +1130,9 @@ fn mutate_paragraph_with_comment(
         }
     }
 
-    if !inserted_start || !inserted_end {
+    if !overlapped {
         bail!(
-            "selection could not be mapped into a commentable run sequence; choose a simpler range or exact search_text"
+            "selection could not be mapped into a visible run sequence; choose a simpler range or exact search_text"
         );
     }
 
@@ -1509,6 +1654,54 @@ mod tests {
         let scan = scan_agent_comments(&output)?;
         assert_eq!(scan.task_count, 1);
         assert_eq!(scan.tasks[0].selected_text, "alpha\tbeta");
+        Ok(())
+    }
+
+    #[test]
+    fn replace_range_text_updates_multi_text_node_run() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        let output = tmp.path().join("output.docx");
+        write_test_docx(&source, TEST_DOCUMENT_XML_WITH_MULTI_TEXT_NODE_RUN, None)?;
+
+        let report = replace_range_text(ReplaceTextRequest {
+            document_path: source,
+            output_path: output.clone(),
+            replacement_text: "delta".to_string(),
+            search_text: Some("alpha beta".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert_eq!(report.selected_text, "alpha beta");
+        let extracted = extract_text(&output, None)?;
+        assert_eq!(extracted.paragraphs[0].text, "delta gamma");
+        Ok(())
+    }
+
+    #[test]
+    fn replace_range_text_updates_tabbed_selection() -> Result<()> {
+        let tmp = tempdir()?;
+        let source = tmp.path().join("input.docx");
+        let output = tmp.path().join("output.docx");
+        write_test_docx(&source, TEST_DOCUMENT_XML_WITH_TABBED_RUN, None)?;
+
+        let report = replace_range_text(ReplaceTextRequest {
+            document_path: source,
+            output_path: output.clone(),
+            replacement_text: "Omega".to_string(),
+            search_text: Some("alpha\tbeta".to_string()),
+            occurrence: 1,
+            paragraph_index: None,
+            start_char: None,
+            end_char: None,
+        })?;
+
+        assert_eq!(report.selected_text, "alpha\tbeta");
+        let extracted = extract_text(&output, None)?;
+        assert_eq!(extracted.paragraphs[0].text, "Omega\ngamma");
         Ok(())
     }
 

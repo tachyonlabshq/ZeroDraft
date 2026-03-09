@@ -148,7 +148,7 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. The first producti
   - local MCP registration
   - `.doc` conversion prerequisites
   - `@Agent` workflow semantics
-- [ ] Create the GitHub repo under `tachyonlabshq`, commit, push, and verify the public history.
+- [x] Create the GitHub repo under `tachyonlabshq`, commit, push, and verify the public history.
 
 ## Phase 8: Post-v1 Expansion
 
