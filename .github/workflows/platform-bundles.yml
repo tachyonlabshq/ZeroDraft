@@ -101,20 +101,32 @@ jobs:
           sudo apt-get install -y clang lld llvm
 
           mkdir -p "$RUNNER_TEMP/llvm-bin"
-          for tool in clang-cl lld-link llvm-lib; do
-            if command -v "$tool" >/dev/null 2>&1; then
-              ln -sf "$(command -v "$tool")" "$RUNNER_TEMP/llvm-bin/$tool"
-              continue
-            fi
+          resolve_tool() {
+            local requested="$1"
+            shift
 
-            versioned_tool="$(find /usr/bin -maxdepth 1 -type f -name "${tool}-*" | sort -V | tail -n 1)"
-            if [ -z "$versioned_tool" ]; then
-              echo "missing required LLVM tool: $tool" >&2
-              exit 1
-            fi
+            for candidate in "$@"; do
+              if command -v "$candidate" >/dev/null 2>&1; then
+                command -v "$candidate"
+                return 0
+              fi
+            done
 
-            ln -sf "$versioned_tool" "$RUNNER_TEMP/llvm-bin/$tool"
-          done
+            for candidate in "$@"; do
+              versioned_tool="$(find /usr/bin -maxdepth 1 -type f -name "${candidate}-*" | sort -V | tail -n 1)"
+              if [ -n "$versioned_tool" ]; then
+                printf '%s\n' "$versioned_tool"
+                return 0
+              fi
+            done
+
+            echo "missing required LLVM tool: $requested" >&2
+            return 1
+          }
+
+          ln -sf "$(resolve_tool clang-cl clang-cl clang)" "$RUNNER_TEMP/llvm-bin/clang-cl"
+          ln -sf "$(resolve_tool lld-link lld-link ld.lld lld)" "$RUNNER_TEMP/llvm-bin/lld-link"
+          ln -sf "$(resolve_tool llvm-lib llvm-lib llvm-ar)" "$RUNNER_TEMP/llvm-bin/llvm-lib"
 
           echo "$RUNNER_TEMP/llvm-bin" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@v2

@@ -126,7 +126,7 @@ ZeroDraft is a Rust-native Word and DOCX skill for AI agents. The first producti
   - Windows x64
   - Windows arm64
   - install-ready per-platform zip bundles with manifests and checksums
-  - Ubuntu-hosted Windows builds install and normalize LLVM tools required by `cargo-xwin` and `cc-rs`
+  - Ubuntu-hosted Windows builds install and shim LLVM tools required by `cargo-xwin` and `cc-rs`
 - [x] Publish a self-contained in-repo bundle layout:
   - `bin/`
   - `SKILL.md`
