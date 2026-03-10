@@ -25,6 +25,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       bundle_version: ${{ steps.version.outputs.bundle_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      release_name: ${{ steps.version.outputs.release_name }}
+      release_prerelease: ${{ steps.version.outputs.release_prerelease }}
+      release_make_latest: ${{ steps.version.outputs.release_make_latest }}
       project_name: ${{ env.PROJECT_NAME }}
       skill_key: ${{ env.SKILL_KEY }}
       binary_name: ${{ env.BINARY_NAME }}
@@ -43,13 +47,26 @@ jobs:
           ref = os.environ["GITHUB_REF"]
           ref_name = os.environ.get("GITHUB_REF_NAME", "")
           sha = os.environ["GITHUB_SHA"][:7]
+          project_name = os.environ["PROJECT_NAME"]
 
           if ref.startswith("refs/tags/v"):
               bundle_version = ref_name[1:]
+              release_tag = ref_name
+              release_name = f"{project_name} {bundle_version}"
+              release_prerelease = "false"
+              release_make_latest = "true"
           else:
-              bundle_version = f"{cargo_version}-main-{sha}"
+              bundle_version = "main-latest"
+              release_tag = "main-latest"
+              release_name = f"{project_name} Main Latest ({sha})"
+              release_prerelease = "true"
+              release_make_latest = "false"
 
           print(f"bundle_version={bundle_version}")
+          print(f"release_tag={release_tag}")
+          print(f"release_name={release_name}")
+          print(f"release_prerelease={release_prerelease}")
+          print(f"release_make_latest={release_make_latest}")
           PY
 
   build-bundles:
@@ -226,7 +243,7 @@ jobs:
             collected/${{ needs.metadata.outputs.project_name }}-bundles-${{ needs.metadata.outputs.bundle_version }}.SHA256SUMS
 
   publish-release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs:
       - metadata
       - build-bundles
@@ -242,6 +259,12 @@ jobs:
       - name: Publish GitHub Release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.metadata.outputs.release_tag }}
+          name: ${{ needs.metadata.outputs.release_name }}
+          prerelease: ${{ needs.metadata.outputs.release_prerelease }}
+          make_latest: ${{ needs.metadata.outputs.release_make_latest }}
+          target_commitish: ${{ github.sha }}
+          overwrite_files: true
           files: |
             release-files/*.zip
             release-files/*.manifest.json

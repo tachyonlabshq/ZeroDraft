@@ -133,7 +133,7 @@ ZeroDraft/
 
 The included `mcp.json` already points at the bundled local binary via a relative `./bin/...` path and passes `mcp-stdio`, so users can download the zip, extract it, and drop the resulting `ZeroDraft/` folder directly into their skills directory.
 
-The workflow uploads per-platform zips, manifests, and checksum files as artifacts, then generates aggregate bundle metadata and SHA256 sums. On `v*` tags it publishes all of those files to the GitHub Release.
+The workflow uploads per-platform zips, manifests, and checksum files as artifacts, then generates aggregate bundle metadata and SHA256 sums. Successful `main` builds publish a rolling `main-latest` prerelease, while `v*` tags publish versioned GitHub Releases.
 
 ## Validation status
 
