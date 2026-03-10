@@ -1,0 +1,206 @@
+name: Platform Bundles
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_NAME: ZeroDraft
+  SKILL_KEY: zerodraft
+  BINARY_NAME: zerodraft
+  README_SOURCE: README.md
+  SKILL_SOURCE: SKILL.md
+  MCP_TEMPLATE: distribution/templates/platform-package-mcp.template.json
+  PACKAGE_SCRIPT: scripts/build_platform_bundle.py
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      bundle_version: ${{ steps.version.outputs.bundle_version }}
+      project_name: ${{ env.PROJECT_NAME }}
+      skill_key: ${{ env.SKILL_KEY }}
+      binary_name: ${{ env.BINARY_NAME }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import os
+          import tomllib
+          from pathlib import Path
+
+          cargo = tomllib.loads(Path("Cargo.toml").read_text())
+          cargo_version = cargo["package"]["version"]
+          ref = os.environ["GITHUB_REF"]
+          ref_name = os.environ.get("GITHUB_REF_NAME", "")
+          sha = os.environ["GITHUB_SHA"][:7]
+
+          if ref.startswith("refs/tags/v"):
+              bundle_version = ref_name[1:]
+          else:
+              bundle_version = f"{cargo_version}-main-{sha}"
+
+          print(f"bundle_version={bundle_version}")
+          PY
+
+  build-bundles:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            artifact_name: zerodraft-macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            build_mode: native
+            binary_path: target/release/zerodraft
+          - platform: macos-x64
+            artifact_name: zerodraft-macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            build_mode: native
+            binary_path: target/release/zerodraft
+          - platform: windows-x64
+            artifact_name: zerodraft-windows-x64
+            runner: ubuntu-latest
+            target: x86_64-pc-windows-msvc
+            build_mode: xwin
+            binary_path: target/x86_64-pc-windows-msvc/release/zerodraft.exe
+          - platform: windows-arm64
+            artifact_name: zerodraft-windows-arm64
+            runner: ubuntu-latest
+            target: aarch64-pc-windows-msvc
+            build_mode: xwin
+            binary_path: target/aarch64-pc-windows-msvc/release/zerodraft.exe
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cargo-xwin
+        if: matrix.build_mode == 'xwin'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-xwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build native release binary
+        if: matrix.build_mode == 'native'
+        run: cargo build --release
+      - name: Build Windows release binary
+        if: matrix.build_mode == 'xwin'
+        run: cargo xwin build --release --target ${{ matrix.target }}
+      - name: Package platform bundle
+        shell: bash
+        run: |
+          python3 "$PACKAGE_SCRIPT" \
+            --platform "${{ matrix.platform }}" \
+            --binary-path "${{ matrix.binary_path }}" \
+            --output-root "$RUNNER_TEMP/platform-bundles" \
+            --project-name "${{ needs.metadata.outputs.project_name }}" \
+            --skill-key "${{ needs.metadata.outputs.skill_key }}" \
+            --version "${{ needs.metadata.outputs.bundle_version }}" \
+            --readme-path "$README_SOURCE" \
+            --skill-path "$SKILL_SOURCE" \
+            --mcp-template-path "$MCP_TEMPLATE"
+      - name: Upload platform bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ runner.temp }}/platform-bundles/${{ needs.metadata.outputs.project_name }}-${{ matrix.platform }}-${{ needs.metadata.outputs.bundle_version }}.zip
+            ${{ runner.temp }}/platform-bundles/${{ needs.metadata.outputs.project_name }}-${{ matrix.platform }}-${{ needs.metadata.outputs.bundle_version }}.manifest.json
+            ${{ runner.temp }}/platform-bundles/${{ needs.metadata.outputs.project_name }}-${{ matrix.platform }}-${{ needs.metadata.outputs.bundle_version }}.sha256.txt
+
+  aggregate-bundles:
+    needs:
+      - metadata
+      - build-bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: collected
+          merge-multiple: true
+      - name: Generate aggregate manifest and checksums
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          project = os.environ["PROJECT_NAME"]
+          version = os.environ["BUNDLE_VERSION"]
+          collected = Path("collected")
+          aggregate_manifest = collected / f"{project}-bundles-{version}.manifest.json"
+          aggregate_checksums = collected / f"{project}-bundles-{version}.SHA256SUMS"
+
+          bundle_entries = []
+          for manifest_path in sorted(collected.glob("*.manifest.json")):
+              bundle_entries.append(json.loads(manifest_path.read_text()))
+
+          aggregate_manifest.write_text(
+              json.dumps(
+                  {
+                      "project_name": project,
+                      "version": version,
+                      "bundle_count": len(bundle_entries),
+                      "bundles": bundle_entries,
+                  },
+                  indent=2,
+              )
+              + "\n"
+          )
+
+          lines = []
+          for zip_path in sorted(collected.glob("*.zip")):
+              digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+              lines.append(f"{digest}  {zip_path.name}")
+
+          aggregate_checksums.write_text("\n".join(lines) + ("\n" if lines else ""))
+          PY
+        env:
+          PROJECT_NAME: ${{ needs.metadata.outputs.project_name }}
+          BUNDLE_VERSION: ${{ needs.metadata.outputs.bundle_version }}
+      - name: Upload aggregate bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zerodraft-platform-bundles-aggregate
+          path: |
+            collected/${{ needs.metadata.outputs.project_name }}-bundles-${{ needs.metadata.outputs.bundle_version }}.manifest.json
+            collected/${{ needs.metadata.outputs.project_name }}-bundles-${{ needs.metadata.outputs.bundle_version }}.SHA256SUMS
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - metadata
+      - build-bundles
+      - aggregate-bundles
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-files/*.zip
+            release-files/*.manifest.json
+            release-files/*.sha256.txt
+            release-files/*.SHA256SUMS

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "__SKILL_KEY__": {
+      "type": "local",
+      "command": [
+        "__BINARY_PATH__",
+        "mcp-stdio"
+      ],
+      "enabled": true
+    }
+  }
+}

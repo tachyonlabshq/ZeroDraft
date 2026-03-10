@@ -111,6 +111,30 @@ The repository includes [mcp.json](/Users/michaelwong/Developer/ZeroDraft/mcp.js
 
 Packaged binaries live under `bin/`. Local builds from this machine currently target macOS first; the GitHub Actions release workflow is configured to produce additional macOS and Windows artifacts.
 
+## Platform Bundles
+
+The repository ships an install-ready bundle workflow at [.github/workflows/platform-bundles.yml](/Users/michaelwong/Developer/ZeroDraft/.github/workflows/platform-bundles.yml). It builds one self-contained zip per platform:
+
+- `ZeroDraft-macos-arm64-<version>.zip`
+- `ZeroDraft-macos-x64-<version>.zip`
+- `ZeroDraft-windows-x64-<version>.zip`
+- `ZeroDraft-windows-arm64-<version>.zip`
+
+Each zip extracts to exactly one top-level folder:
+
+```text
+ZeroDraft/
+  README.md
+  SKILL.md
+  mcp.json
+  bin/
+    zerodraft or zerodraft.exe
+```
+
+The included `mcp.json` already points at the bundled local binary via a relative `./bin/...` path and passes `mcp-stdio`, so users can download the zip, extract it, and drop the resulting `ZeroDraft/` folder directly into their skills directory.
+
+The workflow uploads per-platform zips, manifests, and checksum files as artifacts, then generates aggregate bundle metadata and SHA256 sums. On `v*` tags it publishes all of those files to the GitHub Release.
+
 ## Validation status
 
 Current local validation in this repo:
