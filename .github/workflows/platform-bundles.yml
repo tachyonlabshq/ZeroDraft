@@ -93,6 +93,30 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-xwin
+      - name: Install LLVM toolchain for Windows cross-builds
+        if: matrix.build_mode == 'xwin'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld llvm
+
+          mkdir -p "$RUNNER_TEMP/llvm-bin"
+          for tool in clang-cl lld-link llvm-lib; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              ln -sf "$(command -v "$tool")" "$RUNNER_TEMP/llvm-bin/$tool"
+              continue
+            fi
+
+            versioned_tool="$(find /usr/bin -maxdepth 1 -type f -name "${tool}-*" | sort -V | tail -n 1)"
+            if [ -z "$versioned_tool" ]; then
+              echo "missing required LLVM tool: $tool" >&2
+              exit 1
+            fi
+
+            ln -sf "$versioned_tool" "$RUNNER_TEMP/llvm-bin/$tool"
+          done
+
+          echo "$RUNNER_TEMP/llvm-bin" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@v2
       - name: Build native release binary
         if: matrix.build_mode == 'native'
@@ -100,6 +124,13 @@ jobs:
       - name: Build Windows release binary
         if: matrix.build_mode == 'xwin'
         run: cargo xwin build --release --target ${{ matrix.target }}
+        env:
+          AR_x86_64_pc_windows_msvc: llvm-lib
+          AR_aarch64_pc_windows_msvc: llvm-lib
+          CC_x86_64_pc_windows_msvc: clang-cl
+          CC_aarch64_pc_windows_msvc: clang-cl
+          CXX_x86_64_pc_windows_msvc: clang-cl
+          CXX_aarch64_pc_windows_msvc: clang-cl
       - name: Package platform bundle
         shell: bash
         run: |
